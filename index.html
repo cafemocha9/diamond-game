@@ -641,6 +641,7 @@ function App() {
   const [thinking, setThinking] = useState(false);
   const [fly, setFly] = useState(null);
   const animRef = useRef(null);
+  const flyIdRef = useRef(0);
   function beginGame() {
     let cfg;
     if (players === 1) {
@@ -704,7 +705,7 @@ function App() {
     const dur = Math.max(240, Math.min(620, (move.path.length - 1) * 120));
     if (animRef.current) clearTimeout(animRef.current);
     setFly({
-      id: Date.now(),
+      id: ++flyIdRef.current,
       points: move.path.map(c => screenOf(c)),
       color: seats[seatIdx].color,
       isKing: wasKing,
@@ -712,9 +713,18 @@ function App() {
       dur
     });
     animRef.current = setTimeout(() => setFly(null), dur);
-    const seat = seats[seatIdx];
-    if (hasWon(seatIdx, seat, nocc)) {
-      setWinner(seatIdx);
+    // 着手後は全プレイヤーの勝利を判定（居座りルールでは相手の着手で自分のゴールが満杯になり得る）。着手者を優先。
+    let winSeat = hasWon(seatIdx, seats[seatIdx], nocc) ? seatIdx : -1;
+    if (winSeat < 0) {
+      for (let i = 0; i < seats.length; i++) {
+        if (i !== seatIdx && hasWon(i, seats[i], nocc)) {
+          winSeat = i;
+          break;
+        }
+      }
+    }
+    if (winSeat >= 0) {
+      setWinner(winSeat);
       return;
     }
     setTurn((seatIdx + 1) % seats.length);
@@ -725,9 +735,19 @@ function App() {
     if (!m) return;
     applyMove(selected, m, turn);
   }
+  function seatHasMove(seatIdx, board) {
+    const seat = seats[seatIdx];
+    for (const [k, s] of board) {
+      if (s !== seatIdx) continue;
+      const [x, y, z] = k.split(",").map(Number);
+      if (genMoves({ x, y, z }, board, seat.home, seat.goal).length) return true;
+    }
+    return false;
+  }
   useEffect(() => {
     if (!seats || winner !== null) return;
     if (!seats[turn].cpu) return;
+    if (!seats.some((_, i) => seatHasMove(i, occ))) return;
     setThinking(true);
     const t = setTimeout(() => {
       const choice = cpuChoose(turn, seats, occ, cpuLevel);
@@ -740,6 +760,12 @@ function App() {
     }, 620);
     return () => clearTimeout(t);
   }, [turn, seats, winner, occ, cpuLevel]);
+  useEffect(() => {
+    if (!seats || winner !== null) return;
+    if (seats[turn].cpu) return;
+    if (!seats.some((_, i) => seatHasMove(i, occ))) return;
+    if (!seatHasMove(turn, occ)) setTurn((turn + 1) % seats.length);
+  }, [turn, seats, winner, occ]);
   useEffect(() => {
     if (!curSeat) return;
     if (winner !== null) return;
@@ -766,7 +792,7 @@ function App() {
       className: "card"
     }, React.createElement("h2", null, "対局を準備する"), React.createElement("p", {
       className: "hint"
-    }, "王駒1・子駒14の計15駒を、盤の対角にある同色の陣地へ最も早く運んだ者が勝ち。 連続ジャンプを繋げて一気に距離を稼ぎましょう。"), React.createElement("div", {
+    }, "計15駒を、盤の対角にある同色の陣地へ最も早く運んだ者が勝ち。 連続ジャンプを繋げて一気に距離を稼ぎましょう。"), React.createElement("div", {
       className: "seg-label"
     }, "人数"), React.createElement("div", {
       className: "seg"
@@ -833,7 +859,7 @@ function App() {
         lineHeight: 1.6,
         letterSpacing: "-.01em"
       }
-    }, "手番はグリーン → レッド → イエローの順。", React.createElement("br", null), "王駒は一直線上の駒を飛び越え、子駒は王を飛び越せません。"));
+    }, "手番はグリーン → レッド → イエローの順。"));
   }
   const moveTargets = new Set(moves.map(m => KEY(m.to.x, m.to.y, m.to.z)));
   const lastSet = new Set((lastPath || []).map(c => KEY(c.x, c.y, c.z)));
@@ -1135,7 +1161,7 @@ function App() {
     style: {
       color: COLORS[seats[winner].color].dark
     }
-  }, COLORS[seats[winner].color].name, " の勝利"), React.createElement("p", null, "15個すべての駒を", React.createElement("br", null), "対角の陣地へ運び切りました。"), React.createElement("button", {
+  }, COLORS[seats[winner].color].name, " の勝利"), React.createElement("p", null, "対角の陣地（ゴール）を", React.createElement("br", null), "すべて埋め切りました。"), React.createElement("button", {
     className: "start-btn",
     onClick: () => setScreen("setup")
   }, "もう一局"))));
